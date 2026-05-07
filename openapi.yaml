@@ -1,0 +1,880 @@
+openapi: "3.1.0"
+
+info:
+  title: "UPC API Institucional — Módulo Académico"
+  description: |
+    RESTful integration API for **Universidad Popular del Cesar (UPC)** institutional systems.
+
+    ## Overview
+    This API provides programmatic access to academic data from UPC's ACADEMUSOFT system,
+    including programmes, subjects, periods, student enrollments, and final grades.
+
+    ## Authentication
+    All protected endpoints require a valid **OAuth 2.0 Bearer token** issued by the UPC
+    Keycloak identity provider. Two flows are supported:
+    - **Client Credentials** (machine-to-machine integrations)
+    - **Authorization Code + PKCE** (user-delegated access)
+
+    Tokens are validated against the Keycloak JWKS endpoint. The `scope` claim must include
+    the required scope for each endpoint.
+
+    ## Rate Limiting
+    - Production: 1 000 requests / minute per client
+    - Sandbox: 200 requests / minute per client
+
+    HTTP `429 Too Many Requests` is returned when the limit is exceeded.
+
+    ## Environments
+    | Environment | Base URL |
+    |---|---|
+    | Production | `https://api.unicesar.edu.co/v1` |
+    | Sandbox | `https://api-sandbox.unicesar.edu.co/v1` |
+
+  version: "1.0.0"
+  contact:
+    name: "Dirección de Tecnologías de la Información — UPC"
+    email: "api-soporte@unicesar.edu.co"
+    url: "https://www.unicesar.edu.co"
+  license:
+    name: "Proprietary"
+    url: "https://www.unicesar.edu.co/legal"
+
+servers:
+  - url: "https://api.unicesar.edu.co/v1"
+    description: "Production"
+  - url: "https://api-sandbox.unicesar.edu.co/v1"
+    description: "Sandbox"
+  - url: "http://localhost:8000/v1"
+    description: "Local development"
+
+tags:
+  - name: "Health"
+    description: "Service health and liveness probes (no authentication required)"
+  - name: "Académico"
+    description: "Academic programmes, subjects and periods"
+    externalDocs:
+      description: "UPC academic regulations"
+      url: "https://www.unicesar.edu.co/reglamentos"
+  - name: "Estudiantes"
+    description: "Student enrollment and grade data"
+
+# =============================================================================
+# Security Schemes
+# =============================================================================
+
+components:
+  securitySchemes:
+
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        JWT issued by the UPC Keycloak identity provider.
+        Validate the token against:
+        `https://auth.unicesar.edu.co/realms/upc/protocol/openid-connect/certs`
+
+    OAuth2ClientCredentials:
+      type: oauth2
+      description: "Machine-to-machine (M2M) flow"
+      flows:
+        clientCredentials:
+          tokenUrl: "https://auth.unicesar.edu.co/realms/upc/protocol/openid-connect/token"
+          scopes:
+            "academico:read": "Read academic programs, subjects and periods"
+            "estudiantes:read": "Read student enrollment and grade data"
+            "docentes:read": "Read faculty / teaching staff data"
+            "administrativo:read": "Read administrative data"
+            "sgdea:read": "Read SGDEA document management data"
+            "soporte:read": "Read support / helpdesk data"
+            "eventos:write": "Create and update institutional events"
+            "admin:read": "Read administrative API metrics and health details"
+
+    OAuth2AuthorizationCode:
+      type: oauth2
+      description: "User-delegated access via Authorization Code + PKCE"
+      flows:
+        authorizationCode:
+          authorizationUrl: "https://auth.unicesar.edu.co/realms/upc/protocol/openid-connect/auth"
+          tokenUrl: "https://auth.unicesar.edu.co/realms/upc/protocol/openid-connect/token"
+          scopes:
+            "academico:read": "Read academic programs, subjects and periods"
+            "estudiantes:read": "Read student enrollment and grade data"
+            "docentes:read": "Read faculty / teaching staff data"
+            "administrativo:read": "Read administrative data"
+            "sgdea:read": "Read SGDEA document management data"
+            "soporte:read": "Read support / helpdesk data"
+            "eventos:write": "Create and update institutional events"
+            "admin:read": "Read administrative API metrics and health details"
+
+# =============================================================================
+# Schemas
+# =============================================================================
+
+  schemas:
+
+    ErrorResponse:
+      type: object
+      description: "Standard error response returned on all 4xx and 5xx responses"
+      required: [error, message, timestamp, requestId]
+      properties:
+        error:
+          type: string
+          description: "Machine-readable error code"
+          example: "UNAUTHORIZED"
+          enum:
+            - UNAUTHORIZED
+            - FORBIDDEN
+            - NOT_FOUND
+            - VALIDATION_ERROR
+            - RATE_LIMIT_EXCEEDED
+            - INTERNAL_ERROR
+        message:
+          type: string
+          description: "Human-readable description of the error"
+          example: "Token has expired"
+        timestamp:
+          type: string
+          format: date-time
+          description: "UTC timestamp of the error"
+          example: "2025-07-10T14:30:00.000Z"
+        requestId:
+          type: string
+          format: uuid
+          description: "Unique identifier for this request (use when contacting support)"
+          example: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+
+    Programa:
+      type: object
+      description: "An academic degree programme offered by UPC"
+      required:
+        - codigoPrograma
+        - nombrePrograma
+        - facultad
+        - nivel
+        - modalidad
+        - creditosTotales
+        - duracionSemestres
+        - acreditado
+      properties:
+        codigoPrograma:
+          type: string
+          description: "Unique programme code"
+          example: "ING-SIS-01"
+        nombrePrograma:
+          type: string
+          description: "Full official name of the programme"
+          example: "Ingeniería de Sistemas"
+        facultad:
+          type: string
+          description: "Faculty that owns the programme"
+          example: "Facultad de Ingenierías y Tecnologías"
+        nivel:
+          type: string
+          description: "Academic level"
+          enum: [PREGRADO, POSGRADO, ESPECIALIZACION, MAESTRIA, DOCTORADO]
+          example: "PREGRADO"
+        modalidad:
+          type: string
+          description: "Delivery mode"
+          enum: [PRESENCIAL, VIRTUAL, DISTANCIA]
+          example: "PRESENCIAL"
+        creditosTotales:
+          type: integer
+          description: "Total credit hours required to graduate"
+          example: 160
+        duracionSemestres:
+          type: integer
+          description: "Programme duration in semesters"
+          example: 10
+        registroSnies:
+          type: string
+          nullable: true
+          description: "MEN / SNIES registration number"
+          example: "10943"
+        acreditado:
+          type: boolean
+          description: "Whether the programme holds high-quality accreditation"
+          example: true
+
+    Asignatura:
+      type: object
+      description: "A course / subject within an academic programme"
+      required:
+        - codigoAsignatura
+        - nombreAsignatura
+        - creditos
+        - semestre
+        - tipoAsignatura
+        - areaFormacion
+        - horasSemanales
+        - prerequisitos
+      properties:
+        codigoAsignatura:
+          type: string
+          description: "Unique subject code"
+          example: "IS-301"
+        nombreAsignatura:
+          type: string
+          description: "Full subject name"
+          example: "Ingeniería de Software I"
+        creditos:
+          type: integer
+          description: "Credit hours"
+          example: 3
+        semestre:
+          type: integer
+          minimum: 1
+          maximum: 12
+          description: "Recommended semester"
+          example: 3
+        tipoAsignatura:
+          type: string
+          enum: [OBLIGATORIA, ELECTIVA]
+          description: "Whether the subject is required or elective"
+          example: "OBLIGATORIA"
+        areaFormacion:
+          type: string
+          description: "Knowledge area"
+          example: "Ciencias de la Computación"
+        horasSemanales:
+          type: integer
+          description: "Weekly contact hours"
+          example: 4
+        prerequisitos:
+          type: array
+          items:
+            type: string
+          description: "List of prerequisite subject codes"
+          example: ["IS-201"]
+
+    Periodo:
+      type: object
+      description: "An academic period (semester)"
+      required:
+        - codigoPeriodo
+        - nombrePeriodo
+        - fechaInicio
+        - fechaFin
+        - activo
+        - periodoMatriculas
+      properties:
+        codigoPeriodo:
+          type: string
+          description: "Period code in YYYY-N format"
+          example: "2025-2"
+        nombrePeriodo:
+          type: string
+          description: "Human-readable period name"
+          example: "Segundo Semestre 2025"
+        fechaInicio:
+          type: string
+          format: date
+          description: "Period start date"
+          example: "2025-07-21"
+        fechaFin:
+          type: string
+          format: date
+          description: "Period end date"
+          example: "2025-12-06"
+        activo:
+          type: boolean
+          description: "Whether this period is currently active"
+          example: true
+        periodoMatriculas:
+          type: boolean
+          description: "Whether enrollment is currently open"
+          example: false
+
+    Inscripcion:
+      type: object
+      description: "A student's enrollment in a course for a given period"
+      required:
+        - codigoAsignatura
+        - nombreAsignatura
+        - codigoPrograma
+        - periodo
+        - creditos
+        - grupo
+        - docente
+        - horario
+        - salon
+        - estadoInscripcion
+      properties:
+        codigoAsignatura:
+          type: string
+          example: "IS-301"
+        nombreAsignatura:
+          type: string
+          example: "Ingeniería de Software I"
+        codigoPrograma:
+          type: string
+          example: "ING-SIS-01"
+        periodo:
+          type: string
+          example: "2025-2"
+        creditos:
+          type: integer
+          example: 3
+        grupo:
+          type: string
+          example: "A"
+        docente:
+          type: string
+          example: "Dr. Carlos Pérez"
+        horario:
+          type: string
+          example: "Lunes y Miércoles 08:00-10:00"
+        salon:
+          type: string
+          example: "Bloque A - Aula 201"
+        estadoInscripcion:
+          type: string
+          enum: [ACTIVA, CANCELADA, RETIRADA]
+          example: "ACTIVA"
+
+    CalificacionFinal:
+      type: object
+      description: "Final grade record for a student in a course/period"
+      required:
+        - codigoAsignatura
+        - nombreAsignatura
+        - periodo
+        - creditos
+        - notaFinal
+        - estado
+        - fechaRegistro
+        - docente
+      properties:
+        codigoAsignatura:
+          type: string
+          example: "IS-201"
+        nombreAsignatura:
+          type: string
+          example: "Programación Orientada a Objetos"
+        periodo:
+          type: string
+          example: "2024-2"
+        creditos:
+          type: integer
+          example: 3
+        notaFinal:
+          type: number
+          format: float
+          minimum: 0.0
+          maximum: 5.0
+          example: 3.8
+        notaHabilitacion:
+          type: number
+          format: float
+          minimum: 0.0
+          maximum: 5.0
+          nullable: true
+          description: "Make-up / habilitación grade, if applicable"
+          example: null
+        estado:
+          type: string
+          enum: [APROBADO, REPROBADO, CANCELADO]
+          example: "APROBADO"
+        fechaRegistro:
+          type: string
+          format: date
+          example: "2024-12-10"
+        docente:
+          type: string
+          example: "Dr. Carlos Pérez"
+
+    PaginatedProgramas:
+      type: object
+      description: "Paginated list of academic programmes"
+      required: [data, total, page, limit]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Programa"
+        total:
+          type: integer
+          description: "Total number of records matching the filter"
+          example: 8
+        page:
+          type: integer
+          description: "Current page number (1-indexed)"
+          example: 1
+        limit:
+          type: integer
+          description: "Number of records per page"
+          example: 20
+
+    HealthResponse:
+      type: object
+      required: [status, version, environment]
+      properties:
+        status:
+          type: string
+          example: "ok"
+        version:
+          type: string
+          example: "1.0.0"
+        environment:
+          type: string
+          enum: [production, sandbox]
+          example: "sandbox"
+
+    DetailedHealthResponse:
+      allOf:
+        - $ref: "#/components/schemas/HealthResponse"
+        - type: object
+          properties:
+            timestamp:
+              type: string
+              format: date-time
+            redis:
+              type: string
+              example: "ok"
+            keycloak:
+              type: string
+              example: "ok"
+
+# =============================================================================
+# Responses (reusable)
+# =============================================================================
+
+  responses:
+    Unauthorized:
+      description: "Missing or invalid Bearer token"
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              detail:
+                $ref: "#/components/schemas/ErrorResponse"
+          example:
+            detail:
+              error: "UNAUTHORIZED"
+              message: "Token has expired"
+              timestamp: "2025-07-10T14:30:00.000Z"
+              requestId: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+
+    Forbidden:
+      description: "Insufficient OAuth 2.0 scope"
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              detail:
+                $ref: "#/components/schemas/ErrorResponse"
+          example:
+            detail:
+              error: "FORBIDDEN"
+              message: "Insufficient scope. Required: 'academico:read'."
+              timestamp: "2025-07-10T14:30:00.000Z"
+              requestId: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+
+    NotFound:
+      description: "Resource not found"
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              detail:
+                $ref: "#/components/schemas/ErrorResponse"
+          example:
+            detail:
+              error: "NOT_FOUND"
+              message: "Programme 'NOT-EXIST' not found."
+              timestamp: "2025-07-10T14:30:00.000Z"
+              requestId: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+
+    TooManyRequests:
+      description: "Rate limit exceeded"
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+          description: "Seconds until the rate limit resets"
+        X-RateLimit-Limit:
+          schema:
+            type: integer
+        X-RateLimit-Remaining:
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              detail:
+                $ref: "#/components/schemas/ErrorResponse"
+
+# =============================================================================
+# Parameters (reusable)
+# =============================================================================
+
+  parameters:
+    PageParam:
+      name: page
+      in: query
+      description: "Page number (1-indexed)"
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+
+    LimitParam:
+      name: limit
+      in: query
+      description: "Number of records per page (max 100)"
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+
+# =============================================================================
+# Paths
+# =============================================================================
+
+paths:
+
+  # ---------------------------------------------------------------------------
+  # Health
+  # ---------------------------------------------------------------------------
+
+  /health:
+    get:
+      tags: [Health]
+      operationId: healthCheck
+      summary: "Liveness probe"
+      description: "Returns service status without requiring authentication. Used by load balancers and orchestrators."
+      security: []
+      responses:
+        "200":
+          description: "Service is running"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+              example:
+                status: "ok"
+                version: "1.0.0"
+                environment: "sandbox"
+
+  /health/detailed:
+    get:
+      tags: [Health]
+      operationId: healthDetailed
+      summary: "Detailed health check"
+      description: |
+        Returns detailed service status including Redis and Keycloak connectivity.
+        Requires the `admin:read` scope.
+      security:
+        - BearerAuth: [admin:read]
+        - OAuth2ClientCredentials: [admin:read]
+      responses:
+        "200":
+          description: "Detailed service status"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DetailedHealthResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  # ---------------------------------------------------------------------------
+  # Académico
+  # ---------------------------------------------------------------------------
+
+  /academico/programas:
+    get:
+      tags: [Académico]
+      operationId: listProgramas
+      summary: "Listar programas académicos"
+      description: |
+        Returns a paginated list of all academic programmes offered by UPC.
+        Optionally filter by `nivel` and `modalidad`.
+
+        **Required scope:** `academico:read`
+      security:
+        - BearerAuth: [academico:read]
+        - OAuth2ClientCredentials: [academico:read]
+        - OAuth2AuthorizationCode: [academico:read]
+      parameters:
+        - name: nivel
+          in: query
+          description: "Filter by academic level"
+          required: false
+          schema:
+            type: string
+            enum: [PREGRADO, POSGRADO, ESPECIALIZACION, MAESTRIA, DOCTORADO]
+        - name: modalidad
+          in: query
+          description: "Filter by delivery mode"
+          required: false
+          schema:
+            type: string
+            enum: [PRESENCIAL, VIRTUAL, DISTANCIA]
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/LimitParam"
+      responses:
+        "200":
+          description: "Paginated list of programmes"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedProgramas"
+              example:
+                data:
+                  - codigoPrograma: "ING-SIS-01"
+                    nombrePrograma: "Ingeniería de Sistemas"
+                    facultad: "Facultad de Ingenierías y Tecnologías"
+                    nivel: "PREGRADO"
+                    modalidad: "PRESENCIAL"
+                    creditosTotales: 160
+                    duracionSemestres: 10
+                    registroSnies: "10943"
+                    acreditado: true
+                total: 8
+                page: 1
+                limit: 20
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          description: "Validation error (e.g. limit > 100)"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /academico/programas/{codigoPrograma}/asignaturas:
+    get:
+      tags: [Académico]
+      operationId: listAsignaturas
+      summary: "Listar asignaturas de un programa"
+      description: |
+        Returns all subjects (courses) belonging to the given academic programme.
+        Optionally filter by semester.
+
+        **Required scope:** `academico:read`
+      security:
+        - BearerAuth: [academico:read]
+        - OAuth2ClientCredentials: [academico:read]
+        - OAuth2AuthorizationCode: [academico:read]
+      parameters:
+        - name: codigoPrograma
+          in: path
+          required: true
+          description: "Programme code (e.g. ING-SIS-01)"
+          schema:
+            type: string
+            example: "ING-SIS-01"
+        - name: semestre
+          in: query
+          required: false
+          description: "Filter by semester number (1-12)"
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 12
+      responses:
+        "200":
+          description: "List of subjects"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Asignatura"
+              example:
+                - codigoAsignatura: "IS-301"
+                  nombreAsignatura: "Ingeniería de Software I"
+                  creditos: 3
+                  semestre: 3
+                  tipoAsignatura: "OBLIGATORIA"
+                  areaFormacion: "Ingeniería de Software"
+                  horasSemanales: 4
+                  prerequisitos: ["IS-201"]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /academico/periodos:
+    get:
+      tags: [Académico]
+      operationId: listPeriodos
+      summary: "Listar períodos académicos"
+      description: |
+        Returns academic periods. By default only active periods are returned.
+        Set `soloActivos=false` to include all historical periods.
+
+        **Required scope:** `academico:read`
+      security:
+        - BearerAuth: [academico:read]
+        - OAuth2ClientCredentials: [academico:read]
+        - OAuth2AuthorizationCode: [academico:read]
+      parameters:
+        - name: soloActivos
+          in: query
+          required: false
+          description: "Return only active periods (default: true)"
+          schema:
+            type: boolean
+            default: true
+      responses:
+        "200":
+          description: "List of academic periods"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Periodo"
+              example:
+                - codigoPeriodo: "2025-2"
+                  nombrePeriodo: "Segundo Semestre 2025"
+                  fechaInicio: "2025-07-21"
+                  fechaFin: "2025-12-06"
+                  activo: true
+                  periodoMatriculas: false
+                - codigoPeriodo: "2026-1"
+                  nombrePeriodo: "Primer Semestre 2026"
+                  fechaInicio: "2026-01-26"
+                  fechaFin: "2026-06-06"
+                  activo: true
+                  periodoMatriculas: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  # ---------------------------------------------------------------------------
+  # Estudiantes
+  # ---------------------------------------------------------------------------
+
+  /estudiantes/{estudianteId}/inscripciones:
+    get:
+      tags: [Estudiantes]
+      operationId: getInscripciones
+      summary: "Obtener inscripciones del estudiante"
+      description: |
+        Returns the enrollment list for the given student.
+        Optionally filter by `periodo`.
+
+        **Required scope:** `estudiantes:read`
+      security:
+        - BearerAuth: [estudiantes:read]
+        - OAuth2ClientCredentials: [estudiantes:read]
+        - OAuth2AuthorizationCode: [estudiantes:read]
+      parameters:
+        - name: estudianteId
+          in: path
+          required: true
+          description: "Student identifier (e.g. EST-TEST-001)"
+          schema:
+            type: string
+            example: "EST-TEST-001"
+        - name: periodo
+          in: query
+          required: false
+          description: "Filter by period code (e.g. 2025-2)"
+          schema:
+            type: string
+            example: "2025-2"
+      responses:
+        "200":
+          description: "List of enrollments"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Inscripcion"
+              example:
+                - codigoAsignatura: "IS-301"
+                  nombreAsignatura: "Ingeniería de Software I"
+                  codigoPrograma: "ING-SIS-01"
+                  periodo: "2025-2"
+                  creditos: 3
+                  grupo: "A"
+                  docente: "Dr. Carlos Pérez"
+                  horario: "Lunes y Miércoles 08:00-10:00"
+                  salon: "Bloque A - Aula 201"
+                  estadoInscripcion: "ACTIVA"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /estudiantes/{estudianteId}/calificaciones/{periodo}:
+    get:
+      tags: [Estudiantes]
+      operationId: getCalificaciones
+      summary: "Obtener calificaciones por período"
+      description: |
+        Returns the final grades for the given student in the specified academic period.
+
+        **Required scope:** `estudiantes:read`
+      security:
+        - BearerAuth: [estudiantes:read]
+        - OAuth2ClientCredentials: [estudiantes:read]
+        - OAuth2AuthorizationCode: [estudiantes:read]
+      parameters:
+        - name: estudianteId
+          in: path
+          required: true
+          description: "Student identifier"
+          schema:
+            type: string
+            example: "EST-TEST-001"
+        - name: periodo
+          in: path
+          required: true
+          description: "Academic period code (YYYY-N)"
+          schema:
+            type: string
+            example: "2024-1"
+      responses:
+        "200":
+          description: "List of final grades"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CalificacionFinal"
+              example:
+                - codigoAsignatura: "IS-101"
+                  nombreAsignatura: "Fundamentos de Programación"
+                  periodo: "2024-1"
+                  creditos: 3
+                  notaFinal: 4.2
+                  notaHabilitacion: null
+                  estado: "APROBADO"
+                  fechaRegistro: "2024-06-10"
+                  docente: "Dra. María López"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"

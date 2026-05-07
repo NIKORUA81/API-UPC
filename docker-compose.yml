@@ -1,0 +1,111 @@
+version: "3.9"
+
+# =============================================================================
+# UPC API Institucional — Docker Compose
+#
+# Services:
+#   postgres       Main application database  (port 5432, DB: upc_api)
+#   postgres-audit Audit log database         (port 5433, DB: upc_audit)
+#   redis          Token blacklist + audit queue (port 6379)
+#   api            FastAPI application         (port 8000)
+# =============================================================================
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # Main PostgreSQL database
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: upc_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: upc_user
+      POSTGRES_PASSWORD: upc_password
+      POSTGRES_DB: upc_api
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U upc_user -d upc_api"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # Audit PostgreSQL database
+  # ---------------------------------------------------------------------------
+  postgres-audit:
+    image: postgres:16-alpine
+    container_name: upc_postgres_audit
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: upc_user
+      POSTGRES_PASSWORD: upc_password
+      POSTGRES_DB: upc_audit
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_audit_data:/var/lib/postgresql/data
+      # Auto-apply initial migration on first boot
+      - ./migrations/001_initial.sql:/docker-entrypoint-initdb.d/001_initial.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U upc_user -d upc_audit"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # Redis
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: upc_redis
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # FastAPI application
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: upc_api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://upc_user:upc_password@postgres:5432/upc_api
+      AUDIT_DATABASE_URL: postgresql+asyncpg://upc_user:upc_password@postgres-audit:5432/upc_audit
+      REDIS_URL: redis://redis:6379
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      postgres-audit:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 15s
+      retries: 3
+
+volumes:
+  postgres_data:
+  postgres_audit_data:
+  redis_data:
